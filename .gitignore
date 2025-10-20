@@ -1,0 +1,56 @@
+# R specific
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rhistory
+.Rapp.history
+.o
+.so
+.dll
+.DS_Store
+.env
+.env.local
+.env.*.local
+
+# Data files - too large for git
+*.gz
+*.rds
+*.csv
+*.tsv
+*.txt
+*.log
+
+# Output files
+*.png
+*.pdf
+*.svg
+*.jpg
+*.jpeg
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+
+# OS generated files
+Thumbs.db
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Keep important scripts and docs
+!Files/UMAP/scripts/*.R
+!Files/UMAP/*.md
+!README.md
