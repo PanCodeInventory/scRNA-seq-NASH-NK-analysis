@@ -111,6 +111,32 @@ scRNA-seq/
 - 仅保留脚本和文档文件进行版本控制
 - 建议在运行分析前确保有足够的存储空间
 
-## 联系信息
+## 更新
 
-如有问题或建议，请通过GitHub Issues联系。
+- 2025-10-20
+  - 新增脚本：`Files/UMAP/scripts/remove_doublets_and_contaminants.R`（集成 scDblFinder 去双胞、SingleR 自动注释、UCell 签名评分、去污染规则与重分析的主流程）
+  - 修复 Seurat v5 多层 assay 转换为 SCE 的问题，增强元数据行名对齐与日志/报告目录创建的健壮性
+  - 前台运行并迭代修复，产出早期日志与统计
+
+- 2025-10-20 深夜
+  - 新增特异性 SingleR 修复脚本：`Files/UMAP/scripts/singleR_annotation_fix.R`（从 counts 构建 SCE，scater::logNormCounts 生成 logcounts，显式以 logcounts 作为 SingleR 输入，规避 data 层为空告警）
+  - 产出对象与文档：
+    - `Files/Doublet_Removed/RDS/nk.integrated.singleR_annotated.rds`
+    - `Files/Doublet_Removed/reports/singleR_fix_report.md`
+    - `Files/Doublet_Removed/plots/SingleR_label_barplot.png`
+
+- 2025-10-21
+  - 将 SingleR 修复策略集成至主流程并完成全流程清理与重分析（保留 NK/ILC）
+  - 去双胞结果：移除 312 个细胞（约 1.61%）
+  - 生成清理后对象与报告：
+    - `Files/Doublet_Removed/RDS/nk.integrated.filtered.rds`
+    - `Files/Doublet_Removed/RDS/nk.integrated.doublet_scored.rds`
+    - `Files/Doublet_Removed/reports/cleaning_report.md`
+  - 生成图件：
+    - `Files/Doublet_Removed/plots/DoubletScore_Density.png`
+    - `Files/Doublet_Removed/plots/DoubletScore_Density_bySample.png`
+    - `Files/Doublet_Removed/plots/Cluster_nonNK_fraction.png`
+    - `Files/Doublet_Removed/plots/UMAP_filtered_by_SingleR.png`
+    - `Files/Doublet_Removed/plots/UMAP_filtered_clusters_by_Timepoint.png`（若含 timepoint）
+    - `Files/Doublet_Removed/plots/NK_UCell_by_SingleR_label.png`
+    - `Files/Doublet_Removed/plots/Cluster_UCell_signature_means.png`
