@@ -34,7 +34,15 @@ scRNA-seq/
 │       └── tune_noNKT_dims_resolution.R        # 新增：基于 noNKT 对象进行 dims × resolution 调参并重跑
 ├── 2_Filter/                         # 可选镜像产出目录（按你的偏好保留）
 │   └── 2_Doublet_Removed/{RDS,plots,reports}
-└── 3_Analysis/                       # 下游分析（待扩展）
+└── 3_Analysis/                       # 下游分析
+    ├── 1.ClusterAnalysis/            # 簇比例与差异基因分析产出
+    │   ├── data/                     # CSV 表格（比例/markers）
+    │   ├── plots/                    # 图件（折线/堆叠）
+    │   └── logs/                     # 运行日志与会话信息
+    └── Scripts/                      # 下游分析脚本
+        ├── export_cluster_proportions.R        # 按时间点×簇统计并绘图
+        ├── find_cluster_markers.R             # 每簇差异基因（CLI 参数版，含回退策略）
+        └── find_markers_simple.R              # 每簇差异基因（简化版，快速产出）
 ```
 
 历史路径兼容（Files/*）说明：
@@ -46,14 +54,14 @@ scRNA-seq/
 
 ## 分析流程概览
 
-1) 样本合并与整合（SCTransform + Anchors）
-2) 去双胞（scDblFinder，按样本/时间点分组）
-3) 自动注释（SingleR，logcounts 修复策略）
-4) UCell 基因签名评分（NK/T/B/Myeloid/DC/Plasma/Endothelium/Fibroblast/Hepatocyte）
-5) 去污染（细胞级阈值 + 簇级非 NK 占比阈值）
-6) 重跑降维/聚类/UMAP（兼容 SCT/RNA 多模型，必要时回退）
-7) NKT 剔除（基于 SingleR 标签严格规则）
-8) dims × resolution 调参（UMAP/聚类）与最终参数选择
+1) 样本合并与整合（SCTransform + Anchors）  
+2) 去双胞（scDblFinder，按样本/时间点分组）  
+3) 自动注释（SingleR，logcounts 修复策略）  
+4) UCell 基因签名评分（NK/T/B/Myeloid/DC/Plasma/Endothelium/Fibroblast/Hepatocyte）  
+5) 去污染（细胞级阈值 + 簇级非 NK 占比阈值）  
+6) 重跑降维/聚类/UMAP（兼容 SCT/RNA 多模型，必要时回退）  
+7) NKT 剔除（基于 SingleR 标签严格规则）  
+8) dims × resolution 调参（UMAP/聚类）与最终参数选择  
 9) 按最终参数生成分面 UMAP（timepoint）与标签 UMAP（SingleR）
 
 ## 关键技术与兼容策略
@@ -104,19 +112,72 @@ scRNA-seq/
                 `2_DataProcessing/3_UMAP-Tuning/logs/run_config_*.txt`
                 `2_DataProcessing/3_UMAP-Tuning/logs/sessionInfo_*.txt`
 
-3) 参数建议与可选调整
-- 若希望减少碎簇并增强连通：
-  - 将 UMAP 参数提高平滑度（例如 n.neighbors=50、min.dist=0.5）
-  - 降低聚类分辨率（例如 res≤0.4）
-- 若需更严格的 NKT 排除：
-  - 在 NKT 剔除时引入 NK_UCell − T_UCell ≥ 0.10 的差值约束
-  - 扩充 SingleR 标签排除同义词（如 “NK T cell”, “natural killer T” 等）
+## 使用说明（下游分析 3_Analysis）
+
+前置输入：`1_Files/RDS/nk1.1_integrated.tuned.rds`（含 `timepoint`、`seurat_clusters` 等元数据字段）
+
+A) 按时间点×簇导出比例并绘图
+```bash
+Rscript 3_Analysis/Scripts/export_cluster_proportions.R \
+  --rds 1_Files/RDS/nk1.1_integrated.tuned.rds \
+  --outdir 3_Analysis/1.ClusterAnalysis \
+  --timepoint-order "0W_NCD,1W_MCD,2W_MCD,6W_MCD" \
+  --topk 12 --formats "png,pdf" --width 9 --height 6 --dpi 300
+```
+- 输出：
+  - `3_Analysis/1.ClusterAnalysis/data/cluster_counts_by_timepoint.csv`
+  - `3_Analysis/1.ClusterAnalysis/data/cluster_proportions_by_timepoint.csv`
+  - `3_Analysis/1.ClusterAnalysis/plots/cluster_proportion_lineplot.(png|pdf)`
+  - `3_Analysis/1.ClusterAnalysis/plots/cluster_composition_stackedbar.(png|pdf)`
+  - `3_Analysis/1.ClusterAnalysis/logs/run_config_*.txt`、`sessionInfo_*.txt`
+- 说明：
+  - 自动探测 `timepoint`，如需可通过 `--timepoint-col` 指定；顺序可通过 `--timepoint-order` 显式传入；
+  - 优先采用 `meta.data$seurat_clusters` 作为簇来源，回退 `Idents(obj)`；
+  - 已在脚本内对 Seurat v5 因子/字符比较、空值与顺序拼接做稳健处理并加入调试输出。
+
+B) 每簇差异基因（两种方式二选一）
+- 推荐（参数化 CLI 版，含 assay 回退）：  
+  ```bash
+  Rscript 3_Analysis/Scripts/find_cluster_markers.R \
+    --rds 1_Files/RDS/nk1.1_integrated.tuned.rds \
+    --outdir 3_Analysis/1.ClusterAnalysis \
+    --assay-priority "integrated,SCT,RNA" \
+    --cluster-col seurat_clusters \
+    --only-pos TRUE --min-pct 0.1 --logfc-threshold 0.25 --test-use "wilcox" --topn 10
+  ```
+- 简化快速产出版（无参数）：  
+  ```bash
+  Rscript 3_Analysis/Scripts/find_markers_simple.R
+  ```
+- 输出：
+  - `3_Analysis/1.ClusterAnalysis/data/markers_all_clusters.csv`
+  - `3_Analysis/1.ClusterAnalysis/data/markers_top10_per_cluster.csv`
+  - `3_Analysis/1.ClusterAnalysis/logs/find_markers_simple_*.txt`（或参数化脚本对应日志）
+- 说明：
+  - 会优先使用 integrated→SCT→RNA；若 RNA 被选且 data/VariableFeatures 为空，会自动执行 Normalize/FindVariableFeatures/Scale；
+  - 如有性能需求，可安装 presto 包（Seurat 将自动切换更快的 Wilcoxon 实现）。
+
+## 故障排查（FAQ）
+
+- 报错 “missing value where TRUE/FALSE needed”
+  - 原因：因子与空字符串比较、或顺序拼接含 NA/空值导致 if/while 接收到 NA；
+  - 处理：脚本已改为“先字符过滤、再因子化”，并清洗与回退时间点顺序；可通过 `--timepoint-order` 显式指定顺序。
+- Seurat v5 警告 “slot 已废弃、请用 layer”
+  - 属正常版本提示；分析脚本兼容 layer/slot 接口，已在关键节点做回退与检查。
+- FindAllMarkers 报错或返回 0 行
+  - 请确认所选 assay 的 data/VariableFeatures 非空；可通过参数化脚本的 integrated→SCT→RNA 回退策略或在 RNA 上自动准备；
+  - 可调整 `--min-pct`、`--logfc-threshold` 或 `--test-use "MAST"`。
+- 运行缓慢
+  - 建议安装 presto 包，并根据机器资源配置并行；当前参数化脚本已默认启用稳定执行策略。
 
 ## 主要脚本（当前有效）
 - `2_DataProcessing/Scripts/remove_doublets_and_contaminants.R`：去双胞 + 注释 + UCell + 去污染 + 重分析主流程
 - `2_DataProcessing/Scripts/singleR_annotation_fix.R`：SingleR 空 data 层修复（counts→logNormCounts→SingleR）
 - `2_DataProcessing/Scripts/remove_NKT_cells.R`：在已注释对象上剔除 NKT 并生成报告与图件
 - `2_DataProcessing/Scripts/tune_noNKT_dims_resolution.R`：基于 noNKT 对象进行 dims × resolution 调参、选择并重跑生成最终产物
+- `3_Analysis/Scripts/export_cluster_proportions.R`：簇比例导出与绘图
+- `3_Analysis/Scripts/find_cluster_markers.R`：参数化差异基因（integrated→SCT→RNA 回退）
+- `3_Analysis/Scripts/find_markers_simple.R`：简化版差异基因（快速产出）
 - 历史脚本（仍可参考）：`Files/UMAP/scripts/*`
 
 ## 主要结果（样例）
@@ -131,6 +192,13 @@ scRNA-seq/
   - `2_DataProcessing/3_UMAP-Tuning/data/nk_noNKT_tuning_metrics.csv`
   - `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_byTimepoint.png`
   - `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_bySingleR.png`
+- 下游分析（3_Analysis）：
+  - `3_Analysis/1.ClusterAnalysis/data/cluster_counts_by_timepoint.csv`
+  - `3_Analysis/1.ClusterAnalysis/data/cluster_proportions_by_timepoint.csv`
+  - `3_Analysis/1.ClusterAnalysis/plots/cluster_proportion_lineplot.(png|pdf)`
+  - `3_Analysis/1.ClusterAnalysis/plots/cluster_composition_stackedbar.(png|pdf)`
+  - `3_Analysis/1.ClusterAnalysis/data/markers_all_clusters.csv`
+  - `3_Analysis/1.ClusterAnalysis/data/markers_top10_per_cluster.csv`
 
 ## 技术栈
 - R、Seurat、SingleCellExperiment、scDblFinder、SingleR、celldex、scater、UCell、ggplot2、patchwork
@@ -169,3 +237,15 @@ scRNA-seq/
     - 调参指标与候选：`2_DataProcessing/3_UMAP-Tuning/data/*`
     - 最终参数：dims=10、res=0.3（见 `selected_params.txt`）
     - 最终对象与图：`2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.noNKT.tuned.rds`；`3_UMAP-Tuning/plots/*`
+
+- 2025-10-21（下游分析 3_Analysis）
+  - 新增脚本：`3_Analysis/Scripts/export_cluster_proportions.R`、`3_Analysis/Scripts/find_cluster_markers.R`、`3_Analysis/Scripts/find_markers_simple.R`
+  - 产出（示例）：
+    - `3_Analysis/1.ClusterAnalysis/data/cluster_counts_by_timepoint.csv`
+    - `3_Analysis/1.ClusterAnalysis/data/cluster_proportions_by_timepoint.csv`
+    - `3_Analysis/1.ClusterAnalysis/plots/cluster_proportion_lineplot.(png|pdf)`
+    - `3_Analysis/1.ClusterAnalysis/plots/cluster_composition_stackedbar.(png|pdf)`
+    - `3_Analysis/1.ClusterAnalysis/data/markers_all_clusters.csv`
+    - `3_Analysis/1.ClusterAnalysis/data/markers_top10_per_cluster.csv`
+  - 兼容与性能：
+    - 时间点顺序与因子/字符比较的稳健处理；integrated→SCT→RNA 的差异分析回退；可选安装 presto 提升速度
