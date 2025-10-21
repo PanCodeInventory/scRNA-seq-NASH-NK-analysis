@@ -4,6 +4,42 @@
 
 本项目专注于 NASH（非酒精性脂肪性肝炎）疾病模型中 NK 细胞的单细胞 RNA 测序分析。通过分析不同时间点（0 周、1 周、2 周、6 周）的 NK 细胞样本，研究 NASH 疾病进程中 NK 细胞的变化规律。
 
+## 项目框架
+```mermaid
+flowchart TD
+    Start([开始]) --> Read1[读取10x数据]
+    Read1 --> QC1[安全读取features/genes文件]
+    QC1 --> SCT[SCTransform归一化]
+    SCT --> Integ[样本整合<br/>3000高变基因+锚点法]
+    Integ --> PCA[PCA降维]
+    PCA --> Cluster1[初始聚类<br/>resolution=0.3]
+    Cluster1 --> UMAP1[初始UMAP可视化]
+    
+    UMAP1 --> Doublet[scDblFinder双胞检测]
+    Double1{双胞过滤} -->|singlet| Annot[SingleR自动注释]
+    Double1 -->|doublet| Remove1[移除双胞]
+    
+    Annot --> Fix[SingleR修复<br/>logcounts策略]
+    Fix --> UCell[UCell签名评分<br/>9种细胞类型]
+    UCell --> Contam[污染检测<br/>细胞级+簇级双重过滤]
+    
+    Contam --> NKT[NKT细胞剔除<br/>严格规则匹配]
+    NKT --> Tune[参数调优<br/>dims×resolution网格]
+    Tune --> Final[最终降维/聚类/UMAP<br/>dims=10, res=0.3]
+    
+    Final --> Prop[簇比例分析]
+    Final --> Mark[差异基因分析]
+    Final --> Inspect[对象结构检查]
+    
+    Prop --> End1[比例可视化<br/>折线图+堆叠柱状图]
+    Mark --> End2[标记基因表<br/>全标记+Top10/簇]
+    Inspect --> End3[结构诊断报告]
+    
+    End1 --> Output([最终结果])
+    End2 --> Output
+    End3 --> Output
+```
+
 ## 项目结构（当前主路径：2_DataProcessing/*）
 
 ```
