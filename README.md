@@ -2,121 +2,148 @@
 
 ## 项目概述
 
-本项目专注于NASH（非酒精性脂肪性肝炎）疾病模型中NK细胞的单细胞RNA测序分析。通过分析不同时间点（0周、1周、2周、6周）的NK细胞样本，研究NASH疾病进程中NK细胞的变化规律。
+本项目专注于 NASH（非酒精性脂肪性肝炎）疾病模型中 NK 细胞的单细胞 RNA 测序分析。通过分析不同时间点（0 周、1 周、2 周、6 周）的 NK 细胞样本，研究 NASH 疾病进程中 NK 细胞的变化规律。
 
-## 项目结构
+## 项目结构（当前主路径：2_DataProcessing/*）
 
 ```
 scRNA-seq/
-├── README.md                 # 项目说明文档
-├── .gitignore               # Git忽略文件配置
-├── Files/                   # 项目数据和分析文件
-│   ├── Filter Files/        # 过滤后的10x Genomics数据
-│   │   ├── NCD_NK1.1/       # 正常对照组NK1.1样本
-│   │   ├── MCD-1W_NK1.1/    # 1周MCD组NK1.1样本
-│   │   ├── MCD-2W_NK1.1/    # 2周MCD组NK1.1样本
-│   │   └── MCD-6W_NK1.1/    # 6周MCD组NK1.1样本
-│   ├── UMAP/                # UMAP分析相关文件
-│   │   ├── scripts/         # R分析脚本
-│   │   ├── Results/         # 分析结果
-│   │   │   ├── plots/       # 可视化图表
-│   │   │   ├── data/        # 结果数据
-│   │   │   └── rds/         # R对象文件
-│   │   ├── tuning/          # 参数调优相关文件
-│   │   └── *.md             # 分析文档
-│   └── Annotation/          # 注释文件
-└── Demos/                   # 演示文件
+├── README.md
+├── .gitignore
+├── 1_Files/                          # 原始/预处理数据（按分组）
+│   ├── NK1.1/
+│   └── CD45.2/
+├── 2_DataProcessing/                 # 主数据处理管线（脚本与产物）
+│   ├── 1_Samples_Merging/
+│   │   ├── Scripts & guidedoc*.md
+│   │   └── Results/{data,plots,rds}
+│   ├── 2_Doublet_Removed/            # 去双胞/注释/清理产出（报告与图件）
+│   │   ├── RDS/                      # R 对象（清理后 / 单细胞注释 / noNKT / tuned）
+│   │   ├── plots/                    # UMAP 等图件
+│   │   └── reports/                  # 报告（cleaning / singleR 修复 / noNKT）
+│   ├── 3_UMAP-Tuning/                # UMAP 调参与选择产出（metrics/plots/logs）
+│   │   ├── data/                     # 调参指标与候选 CSV
+│   │   ├── plots/                    # 调参热力图与候选 UMAP
+│   │   └── logs/                     # 运行配置与会话信息
+│   └── Scripts/                      # 脚本（生成、清理、调参）
+│       ├── generate_umap_nk.R
+│       ├── generate_umap_nk_post.R
+│       ├── remove_doublets_and_contaminants.R
+│       ├── singleR_annotation_fix.R
+│       ├── remove_NKT_cells.R                  # 新增：在已注释对象上剔除 NKT
+│       └── tune_noNKT_dims_resolution.R        # 新增：基于 noNKT 对象进行 dims × resolution 调参并重跑
+├── 2_Filter/                         # 可选镜像产出目录（按你的偏好保留）
+│   └── 2_Doublet_Removed/{RDS,plots,reports}
+└── 3_Analysis/                       # 下游分析（待扩展）
 ```
 
-## 样本信息
+历史路径兼容（Files/*）说明：
+- 早期版本产物位于 `Files/UMAP/*` 与 `Files/Doublet_Removed/*`。当前主路径已迁移至 `2_DataProcessing/*`，新产物与脚本请以该路径为准。
 
-### 实验分组
-- **NCD (正常对照组)**: 0周时间点
-- **MCD (模型组)**: 1周、2周、6周时间点
+## 样本与分组信息
+- 分组：NCD（0W）与 MCD（1W/2W/6W）
+- 细胞类型：NK1.1（自然杀伤细胞）与 CD45.2（白细胞共同抗原）
 
-### 细胞类型
-- **NK1.1细胞**: 自然杀伤细胞，标记为NK1.1
-- **CD45.2细胞**: 白细胞共同抗原标记细胞
+## 分析流程概览
 
-## 分析流程
+1) 样本合并与整合（SCTransform + Anchors）
+2) 去双胞（scDblFinder，按样本/时间点分组）
+3) 自动注释（SingleR，logcounts 修复策略）
+4) UCell 基因签名评分（NK/T/B/Myeloid/DC/Plasma/Endothelium/Fibroblast/Hepatocyte）
+5) 去污染（细胞级阈值 + 簇级非 NK 占比阈值）
+6) 重跑降维/聚类/UMAP（兼容 SCT/RNA 多模型，必要时回退）
+7) NKT 剔除（基于 SingleR 标签严格规则）
+8) dims × resolution 调参（UMAP/聚类）与最终参数选择
+9) 按最终参数生成分面 UMAP（timepoint）与标签 UMAP（SingleR）
 
-### 1. 数据预处理
-- 10x Genomics原始数据质控
-- 细胞过滤和质量控制
-- 标准化处理
+## 关键技术与兼容策略
 
-### 2. 数据整合
-- 使用Seurat包进行SCTransform标准化
-- 锚点整合多个样本
-- 创建整合后的Seurat对象
+- 平台/框架：R、Seurat 5.x、SingleCellExperiment、scDblFinder、SingleR、celldex、scater、UCell、ggplot2、patchwork
+- Seurat v5 多层 assay 差异：
+  - 优先使用 layer 接口获取数据，必要时回退 slot 接口；兼容 RNA/SCT/integrated
+  - 避免直接 `as.SingleCellExperiment(seu)`，显式构建 SCE 并确保 counts/logcounts 与 colData 对齐
+- SingleR 修复策略：
+  - 从 Seurat 提取 counts → SCE → `scater::logNormCounts` 生成 logcounts → SingleR 显式 `assay.type="logcounts"`
+- 去污染判定：
+  - 细胞级：NK_UCell ≥ P60 且 Δ(NK − max(others)) ≥ 0.05，或 SingleR 注释命中 NK/ILC
+  - 簇级：簇内非 NK 注释占比 ≥ 0.7 则整体剔除
+- 降维稳健性：
+  - RNA：NormalizeData → FindVariableFeatures → ScaleData → RunPCA
+  - SCT：直接使用 VariableFeatures；若 SCT 无 VF 则回退 RNA 并自动计算 HVG
 
-### 3. 降维与聚类
-- 主成分分析（PCA）
-- UMAP降维
-- 细胞聚类分析
+## 使用说明（一键运行关键步骤）
 
-### 4. 可视化分析
-- 生成各时间点的UMAP图
-- 聚类结果可视化
-- 趋势分析图表
+1) 在已完成 SingleR 注释的对象上剔除 NKT
+- 输入：`2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.singleR_annotated.rds`
+- 运行：
+  ```bash
+  Rscript 2_DataProcessing/Scripts/remove_NKT_cells.R
+  ```
+- 产出：
+  - `2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.noNKT.rds`
+  - `2_DataProcessing/2_Doublet_Removed/reports/noNKT_removal_report.md`
+  - `2_DataProcessing/2_Doublet_Removed/reports/removed_NKT_cell_ids.csv`
+  - `2_DataProcessing/2_Doublet_Removed/plots/NKT_removal_label_counts_before_after.png`
 
-## 主要脚本
+2) 基于 noNKT 对象进行 dims × resolution 调参并重跑
+- 输入：`2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.noNKT.rds`
+- 运行：
+  ```bash
+  Rscript 2_DataProcessing/Scripts/tune_noNKT_dims_resolution.R
+  ```
+- 产出：
+  - 调参指标：`2_DataProcessing/3_UMAP-Tuning/data/nk_noNKT_tuning_metrics.csv`
+  - 候选组合：`2_DataProcessing/3_UMAP-Tuning/data/nk_noNKT_tuning_best_per_dims.csv`
+               `2_DataProcessing/3_UMAP-Tuning/data/nk_noNKT_tuning_top_candidates.csv`
+  - 热力图/分面：`2_DataProcessing/3_UMAP-Tuning/plots/heatmap_*_noNKT.(png|pdf)`
+                 `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_tuning_dims*_res*_byTimepoint.(png|pdf)`
+  - 最终对象：`2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.noNKT.tuned.rds`
+  - 最终图件：`2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_byTimepoint.png`
+               `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_bySingleR.png`
+  - 参数与日志：`2_DataProcessing/3_UMAP-Tuning/logs/selected_params.txt`
+                `2_DataProcessing/3_UMAP-Tuning/logs/run_config_*.txt`
+                `2_DataProcessing/3_UMAP-Tuning/logs/sessionInfo_*.txt`
 
-- `Files/UMAP/scripts/generate_umap_nk.R` - 主要UMAP分析脚本
-- `Files/UMAP/scripts/generate_umap_nk_post.R` - 后处理脚本
-- `Files/UMAP/scripts/tune_nk_dims_resolution.R` - 参数调优脚本
-- `Files/UMAP/scripts/generate_umap_nk_equalized.R` - 均衡化分析脚本
+3) 参数建议与可选调整
+- 若希望减少碎簇并增强连通：
+  - 将 UMAP 参数提高平滑度（例如 n.neighbors=50、min.dist=0.5）
+  - 降低聚类分辨率（例如 res≤0.4）
+- 若需更严格的 NKT 排除：
+  - 在 NKT 剔除时引入 NK_UCell − T_UCell ≥ 0.10 的差值约束
+  - 扩充 SingleR 标签排除同义词（如 “NK T cell”, “natural killer T” 等）
 
-## 主要结果
+## 主要脚本（当前有效）
+- `2_DataProcessing/Scripts/remove_doublets_and_contaminants.R`：去双胞 + 注释 + UCell + 去污染 + 重分析主流程
+- `2_DataProcessing/Scripts/singleR_annotation_fix.R`：SingleR 空 data 层修复（counts→logNormCounts→SingleR）
+- `2_DataProcessing/Scripts/remove_NKT_cells.R`：在已注释对象上剔除 NKT 并生成报告与图件
+- `2_DataProcessing/Scripts/tune_noNKT_dims_resolution.R`：基于 noNKT 对象进行 dims × resolution 调参、选择并重跑生成最终产物
+- 历史脚本（仍可参考）：`Files/UMAP/scripts/*`
 
-### 图表文件
-- UMAP聚类图（各时间点）
-- 聚类组成趋势图
-- 肘部图（PCA维度选择）
-- 调优热图
-
-### 数据文件
-- 聚类组成趋势数据
-- 调优指标数据
-- 整合后的R对象
+## 主要结果（样例）
+- 去双胞/清理整体：
+  - `2_DataProcessing/2_Doublet_Removed/reports/cleaning_report.md`
+  - `2_DataProcessing/2_Doublet_Removed/plots/UMAP_filtered_by_SingleR.png`
+  - `2_DataProcessing/2_Doublet_Removed/plots/UMAP_filtered_clusters_by_Timepoint.png`
+- NKT 剔除：
+  - `2_DataProcessing/2_Doublet_Removed/reports/noNKT_removal_report.md`
+  - `2_DataProcessing/2_Doublet_Removed/plots/NKT_removal_label_counts_before_after.png`
+- 调参与最终：
+  - `2_DataProcessing/3_UMAP-Tuning/data/nk_noNKT_tuning_metrics.csv`
+  - `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_byTimepoint.png`
+  - `2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noNKT_final_bySingleR.png`
 
 ## 技术栈
-
-- **R语言**: 主要分析语言
-- **Seurat**: 单细胞分析包
-- **ggplot2**: 数据可视化
-- **patchwork**: 图形组合
-
-## 使用说明
-
-1. 确保安装了必要的R包：
-   ```r
-   install.packages(c("Seurat", "dplyr", "ggplot2", "patchwork"))
-   ```
-
-2. 运行主要分析脚本：
-   ```r
-   source("Files/UMAP/scripts/generate_umap_nk.R")
-   ```
-
-3. 查看分析文档：
-   - `Files/UMAP/guidedoc.md` - 详细分析指南
-   - `Files/UMAP/guidedoc_resolution.md` - 分辨率调优指南
-   - `Files/UMAP/guidedoc_UMAP_Normalization.md` - 标准化指南
+- R、Seurat、SingleCellExperiment、scDblFinder、SingleR、celldex、scater、UCell、ggplot2、patchwork
 
 ## 注意事项
-
-- 原始数据文件较大，已配置.gitignore排除
-- 结果文件（图片、R对象等）也排除在版本控制外
-- 仅保留脚本和文档文件进行版本控制
-- 建议在运行分析前确保有足够的存储空间
+- `.gitignore` 默认排除大体量数据与图件/RDS 等产物；脚本与文档纳入版本控制
+- Seurat 版本差异可能影响 `FindClusters` 图名称；已在脚本内自动选择可用 `graph.name`
 
 ## 更新
 
 - 2025-10-20
   - 新增脚本：`Files/UMAP/scripts/remove_doublets_and_contaminants.R`（集成 scDblFinder 去双胞、SingleR 自动注释、UCell 签名评分、去污染规则与重分析的主流程）
   - 修复 Seurat v5 多层 assay 转换为 SCE 的问题，增强元数据行名对齐与日志/报告目录创建的健壮性
-  - 前台运行并迭代修复，产出早期日志与统计
 
 - 2025-10-20 深夜
   - 新增特异性 SingleR 修复脚本：`Files/UMAP/scripts/singleR_annotation_fix.R`（从 counts 构建 SCE，scater::logNormCounts 生成 logcounts，显式以 logcounts 作为 SingleR 输入，规避 data 层为空告警）
@@ -125,18 +152,20 @@ scRNA-seq/
     - `Files/Doublet_Removed/reports/singleR_fix_report.md`
     - `Files/Doublet_Removed/plots/SingleR_label_barplot.png`
 
-- 2025-10-21
+- 2025-10-21（清理与重分析）
   - 将 SingleR 修复策略集成至主流程并完成全流程清理与重分析（保留 NK/ILC）
   - 去双胞结果：移除 312 个细胞（约 1.61%）
-  - 生成清理后对象与报告：
+  - 生成清理后对象与报告（历史路径 Files/*）：
     - `Files/Doublet_Removed/RDS/nk.integrated.filtered.rds`
     - `Files/Doublet_Removed/RDS/nk.integrated.doublet_scored.rds`
     - `Files/Doublet_Removed/reports/cleaning_report.md`
-  - 生成图件：
-    - `Files/Doublet_Removed/plots/DoubletScore_Density.png`
-    - `Files/Doublet_Removed/plots/DoubletScore_Density_bySample.png`
-    - `Files/Doublet_Removed/plots/Cluster_nonNK_fraction.png`
-    - `Files/Doublet_Removed/plots/UMAP_filtered_by_SingleR.png`
-    - `Files/Doublet_Removed/plots/UMAP_filtered_clusters_by_Timepoint.png`（若含 timepoint）
-    - `Files/Doublet_Removed/plots/NK_UCell_by_SingleR_label.png`
-    - `Files/Doublet_Removed/plots/Cluster_UCell_signature_means.png`
+  - 图件（历史路径 Files/*）：DoubletScore、Cluster_nonNK_fraction、UMAP 等
+
+- 2025-10-21（NKT 剔除 + UMAP 调参与最终）
+  - 新增脚本：`2_DataProcessing/Scripts/remove_NKT_cells.R`（严格规则排除 NKT）
+  - 新增脚本：`2_DataProcessing/Scripts/tune_noNKT_dims_resolution.R`（调参与最终降维/聚类/UMAP）
+  - 产出：
+    - NKT 剔除：19126 → 19007（移除 119，0.62%）
+    - 调参指标与候选：`2_DataProcessing/3_UMAP-Tuning/data/*`
+    - 最终参数：dims=10、res=0.3（见 `selected_params.txt`）
+    - 最终对象与图：`2_DataProcessing/2_Doublet_Removed/RDS/nk.integrated.noNKT.tuned.rds`；`3_UMAP-Tuning/plots/*`
