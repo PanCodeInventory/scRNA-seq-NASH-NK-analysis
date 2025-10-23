@@ -7,7 +7,7 @@ suppressPackageStartupMessages({
 })
 
 # Paths
-rds_path <- "1_Files/RDS/nk1.1_integrated.tuned.rds"
+rds_path <- "2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds"
 outdir   <- "3_Analysis/1.ClusterAnalysis"
 data_dir <- file.path(outdir, "data")
 logs_dir <- file.path(outdir, "logs")

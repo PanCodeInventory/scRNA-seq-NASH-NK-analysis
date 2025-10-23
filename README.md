@@ -67,7 +67,9 @@ scRNA-seq/
 │       ├── remove_doublets_and_contaminants.R
 │       ├── singleR_annotation_fix.R
 │       ├── remove_NKT_cells.R                  # 新增：在已注释对象上剔除 NKT
-│       └── tune_noNKT_dims_resolution.R        # 新增：基于 noNKT 对象进行 dims × resolution 调参并重跑
+│       ├── tune_noNKT_dims_resolution.R        # 新增：基于 noNKT 对象进行 dims × resolution 调参并重跑
+│       ├── remove_clusters_and_recompute.R     # 新增：移除指定簇并重新计算UMAP/聚类
+│       └── tune_noCluster6_dims_resolution.R   # 新增：基于无Cluster6对象的调参脚本
 ├── 2_Filter/                         # 可选镜像产出目录（按你的偏好保留）
 │   └── 2_Doublet_Removed/{RDS,plots,reports}
 └── 3_Analysis/                       # 下游分析
@@ -148,14 +150,38 @@ scRNA-seq/
                 `2_DataProcessing/3_UMAP-Tuning/logs/run_config_*.txt`
                 `2_DataProcessing/3_UMAP-Tuning/logs/sessionInfo_*.txt`
 
+3) 移除污染簇（如Cluster 6）并重新分析
+- 输入：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.rds`
+- 运行：
+ ```bash
+ Rscript 2_DataProcessing/Scripts/remove_clusters_and_recompute.R \
+   --rds-in 2_DataProcessing/RDS/nk.integrated.singleR_annotated.rds \
+   --out-rds 2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.rds \
+   --rm-clusters "6" --dims 10 --resolution 0.3
+ ```
+- 产出：
+ - 清理后对象：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.rds`
+ - UMAP图件：`2_DataProcessing/3_Tuning/plots/UMAP_noCluster6_byTimepoint.(png|pdf)`
+
+4) 基于清理后数据的参数优化
+- 输入：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.rds`
+- 运行：
+ ```bash
+ Rscript 2_DataProcessing/Scripts/tune_noCluster6_dims_resolution.R
+ ```
+- 产出：
+ - 最终对象：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds`
+ - 调参报告：`2_DataProcessing/3_UMAP-Tuning/data/nk_noCluster6_tuning_metrics.csv`
+ - 最终图件：`2_DataProcessing/3_UMAP-Tuning/plots/UMAP_noCluster6_final_byTimepoint.png`
+
 ## 使用说明（下游分析 3_Analysis）
 
-前置输入：`1_Files/RDS/nk1.1_integrated.tuned.rds`（含 `timepoint`、`seurat_clusters` 等元数据字段）
+前置输入：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds`（含 `timepoint`、`seurat_clusters` 等元数据字段）
 
 A) 按时间点×簇导出比例并绘图
 ```bash
 Rscript 3_Analysis/Scripts/export_cluster_proportions.R \
-  --rds 1_Files/RDS/nk1.1_integrated.tuned.rds \
+  --rds 2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds \
   --outdir 3_Analysis/1.ClusterAnalysis \
   --timepoint-order "0W_NCD,1W_MCD,2W_MCD,6W_MCD" \
   --topk 12 --formats "png,pdf" --width 9 --height 6 --dpi 300
@@ -175,7 +201,7 @@ B) 每簇差异基因（两种方式二选一）
 - 推荐（参数化 CLI 版，含 assay 回退）：  
   ```bash
   Rscript 3_Analysis/Scripts/find_cluster_markers.R \
-    --rds 1_Files/RDS/nk1.1_integrated.tuned.rds \
+    --rds 2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds \
     --outdir 3_Analysis/1.ClusterAnalysis \
     --assay-priority "integrated,SCT,RNA" \
     --cluster-col seurat_clusters \
@@ -285,3 +311,66 @@ B) 每簇差异基因（两种方式二选一）
     - `3_Analysis/1.ClusterAnalysis/data/markers_top10_per_cluster.csv`
   - 兼容与性能：
     - 时间点顺序与因子/字符比较的稳健处理；integrated→SCT→RNA 的差异分析回退；可选安装 presto 提升速度
+
+- 2025-10-23（Cluster 6污染清理 + 重新调优）
+  - 新增脚本：`2_DataProcessing/Scripts/remove_clusters_and_recompute.R`（移除指定簇并重新计算UMAP/聚类）
+  - 新增脚本：`2_DataProcessing/Scripts/tune_noCluster6_dims_resolution.R`（基于无Cluster6对象的参数优化）
+  - 污染清理：移除596个细胞（19,126→18,530，移除3.1%），主要是B细胞污染
+  - 重新调优：最佳参数dims=10, resolution=0.3，轮廓系数0.276
+  - 重新聚类：获得7个生物学意义明确的NK细胞亚群
+  - 更新分析：
+    - `3_Analysis/1.ClusterAnalysis/data/cluster_proportions_by_timepoint.csv`
+    - `3_Analysis/1.ClusterAnalysis/data/markers_top10_per_cluster.csv`
+    - `3_Analysis/1.ClusterAnalysis/plots/cluster_proportion_lineplot.(png|pdf)`
+  - 核心对象：`2_DataProcessing/RDS/nk.integrated.singleR_annotated.noCluster6.tuned.rds`
+
+## 📋 后续分析规划
+
+### 🎯 第一阶段：功能富集分析（优先级：高）
+- **目标**：理解各细胞簇的生物学功能和通路
+- **工具**：clusterProfiler（GO、KEGG、Reactome）
+- **输入**：各簇标记基因列表（已获得）
+- **预期产出**：
+  - `3_Analysis/2.FunctionalEnrichment/data/go_enrichment_results.csv`
+  - `3_Analysis/2.FunctionalEnrichment/data/kegg_pathway_results.csv`
+  - `3_Analysis/2.FunctionalEnrichment/plots/go_dotplot.(png|pdf)`
+  - `3_Analysis/2.FunctionalEnrichment/plots/kegg_pathway_map.(png|pdf)`
+
+### 🔬 第二阶段：细胞轨迹分析（优先级：中）
+- **目标**：揭示NK细胞在NASH进程中的状态转换轨迹
+- **工具**：Monocle3 或 Slingshot
+- **重点**：簇0在6W的扩增机制和功能转变
+- **预期产出**：
+  - `3_Analysis/3.TrajectoryAnalysis/data/pseudotime_order.csv`
+  - `3_Analysis/3.TrajectoryAnalysis/plots/trajectory_plot.(png|pdf)`
+  - `3_Analysis/3.TrajectoryAnalysis/plots/branch_expression_heatmap.(png|pdf)`
+
+### 📊 第三阶段：细胞通讯分析（优先级：中）
+- **目标**：分析NK细胞与其他免疫细胞的相互作用
+- **工具**：CellPhoneDB 或 NicheNet
+- **预期产出**：
+  - `3_Analysis/4.CellCommunication/data/ligand_receptor_pairs.csv`
+  - `3_Analysis/4.CellCommunication/plots/communication_network.(png|pdf)`
+
+### 📈 第四阶段：时间序列建模（优先级：低）
+- **目标**：建模NASH疾病进程中NK细胞的动态变化规律
+- **工具**：tradeSeq、maSigPro
+- **预期产出**：
+  - `3_Analysis/5.TimeSeries/data/time_series_models.rds`
+  - `3_Analysis/5.TimeSeries/plots/dynamic_expression_patterns.(png|pdf)`
+
+### 🎨 第五阶段：发表级图表准备（持续进行）
+- **目标**：生成高质量的可视化图表
+- **内容**：整合所有分析结果的综合图表
+- **预期产出**：
+  - `3_Analysis/6.Figures/figure_panels/`
+  - `3_Analysis/6.Figures/multi_panel_figures.(pdf|svg)`
+
+## 🚀 下一步行动建议
+1. **立即开始**：功能富集分析（已有标记基因数据）
+2. **并行开展**：细胞轨迹分析设计
+3. **适时启动**：细胞通讯分析（需要其他细胞类型数据）
+4. **持续进行**：图表优化和结果整理
+
+---
+*最后更新：2025-10-23*

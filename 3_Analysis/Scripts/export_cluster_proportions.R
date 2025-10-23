@@ -150,6 +150,12 @@ main <- function(opt) {
   if (is.null(cluster_vec) || length(cluster_vec) == 0) {
     stop("Cluster vector is empty; please specify --cluster-col explicitly or check the object.")
   }
+  # Enforce alignment: cluster vector length must match number of cells, and Idents must be set with names
+  if (length(cluster_vec) != ncol(obj)) {
+    stop(sprintf("Cluster vector length (%d) != number of cells (%d).", length(cluster_vec), ncol(obj)))
+  }
+  names(cluster_vec) <- colnames(obj)
+  Idents(obj) <- factor(cluster_vec)
   if (length(unique(cluster_vec)) <= 1) {
     message("[WARN] Only one unique cluster detected; proceeding may produce trivial plots.")
   }
@@ -254,34 +260,35 @@ main <- function(opt) {
   }
 
   # Logs (robust)
-  timepoint_order_str <- ""
-  if (exists("tp_ord_fin")) {
-    timepoint_order_str <- paste(tp_ord_fin, collapse = ",")
-  } else if (exists("tp_order")) {
-    timepoint_order_str <- paste(tp_order, collapse = ",")
-  } else {
-    # last resort: use levels from df_meta if present
-    if (exists("df_meta") && "timepoint" %in% colnames(df_meta)) {
-      timepoint_order_str <- paste(levels(df_meta$timepoint), collapse = ",")
+  tryCatch({
+    timepoint_order_str <- ""
+    if (exists("tp_ord_fin") && length(tp_ord_fin) > 0) {
+      timepoint_order_str <- paste(as.character(tp_ord_fin), collapse = ",")
+    } else if (exists("tp_order") && length(tp_order) > 0) {
+      timepoint_order_str <- paste(as.character(tp_order), collapse = ",")
+    } else if (exists("df_meta") && "timepoint" %in% colnames(df_meta)) {
+      lev <- levels(df_meta$timepoint)
+      if (!is.null(lev) && length(lev) > 0) {
+        timepoint_order_str <- paste(as.character(lev), collapse = ",")
+      }
     }
-  }
-  config_lines <- c(
-    sprintf("rds: %s", opt$rds),
-    sprintf("outdir: %s", opt$outdir),
-    sprintf("timepoint_col: %s", if (exists("tp_col")) tp_col else ""),
-    sprintf("cluster_source: %s", if (opt$cluster_col == "") "Idents(obj)" else opt$cluster_col),
-    sprintf("timepoint_order_used: %s", timepoint_order_str),
-    sprintf("topk: %s", opt$topk),
-    sprintf("formats: %s", paste(formats, collapse = ",")),
-    sprintf("n_cells: %s", ncol(obj)),
-    sprintf("n_clusters: %s", length(unique(cluster_vec)))
-  )
-  tryCatch(
-    { write_run_logs(logs_dir, config_lines) },
-    error = function(e) {
-      message(sprintf("[WARN] write_run_logs failed: %s", e$message))
+    config_lines <- c(
+      sprintf("rds: %s", opt$rds),
+      sprintf("outdir: %s", opt$outdir),
+      sprintf("timepoint_col: %s", if (exists("tp_col")) tp_col else ""),
+      sprintf("cluster_source: %s", if (opt$cluster_col == "") "Idents(obj)" else opt$cluster_col),
+      sprintf("timepoint_order_used: %s", timepoint_order_str),
+      sprintf("topk: %s", opt$topk),
+      sprintf("formats: %s", paste(formats, collapse = ",")),
+      sprintf("n_cells: %s", ncol(obj)),
+      sprintf("n_clusters: %s", length(unique(cluster_vec)))
+    )
+    if (length(config_lines) > 0) {
+      write_run_logs(logs_dir, config_lines)
     }
-  )
+  }, error = function(e) {
+    message(sprintf("[WARN] Logs block failed: %s", e$message))
+  })
 
   message("[INFO] Done.")
 }
